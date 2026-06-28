@@ -99,7 +99,12 @@ export async function POST(req: NextRequest) {
 
     // 2. Formulate prompting instructions
     const prompt = `You are a medical school professor compiling exam sheets for a 3rd MBBS exam (UNEC).
-Create exactly ${count} multiple-choice questions from the following lectures context.
+Create exactly ${count} multiple-choice questions.
+
+CRITICAL INSTRUCTIONS:
+1. STRICT SOURCE-GROUNDING: Only generate questions, concepts, and options that are directly and explicitly supported by the facts in the supplied LECTURES CONTEXT. Do not use external medical knowledge, outside assumptions, or topics that are not present in the context.
+2. NO OPTION REPETITION: Every question must have its own unique, distinct set of options. Do NOT repeat or reuse the same option text (or highly similar distractors) across multiple questions.
+3. ABSOLUTE ACCURACY: Double check that the correct option label matches the actual correct answer for the question stem. Ensure that the explanations (both for the correct option and the incorrect distractors) correspond precisely to that specific question stem and its options. Do not mix up questions with wrong options or incorrect rationales.
 
 CRITERIA:
 - Topic focus requested: ${topic || 'General study guidelines'}.
@@ -109,7 +114,7 @@ CRITERIA:
 - Specify ONE correct option.
 - Scramble the correct labels (A, B, C, or D) randomly so there is a roughly even distribution and no clustering patterns.
 - For the correct option, provide "explanationCorrect".
-- For EACH of the three incorrect options (distractors), write a specific "explanationWrong" explaining why that choice is incorrect (do not write generic "incorrect" notes; explain the distractor logic).
+- For EACH of the three incorrect options (distractors), write a specific "explanationWrong" explaining why that choice is incorrect.
 
 LECTURES CONTEXT:
 ${contextText.slice(0, 20000)}
@@ -141,7 +146,7 @@ ${contextText.slice(0, 20000)}
       const qId = `gen_q_${Date.now()}_${qIdx}`;
       
       const optionsMapped = q.options.map((opt: any) => {
-        const isCorrect = opt.label === q.correctLabel;
+        const isCorrect = opt.label.trim().toUpperCase() === q.correctLabel.trim().toUpperCase();
         const optId = `gen_opt_${Date.now()}_${qIdx}_${opt.label.toLowerCase()}`;
         
         return {
@@ -152,7 +157,7 @@ ${contextText.slice(0, 20000)}
         };
       });
 
-      const correctOption = optionsMapped.find((o: any) => o.label === q.correctLabel);
+      const correctOption = optionsMapped.find((o: any) => o.label.trim().toUpperCase() === q.correctLabel.trim().toUpperCase());
 
       return {
         materialId: materialIds[0],
