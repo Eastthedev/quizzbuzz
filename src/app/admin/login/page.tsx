@@ -115,10 +115,6 @@ export default function AdminLoginPage() {
           </form>
         </div>
 
-        {/* Info */}
-        <div className="mt-8 text-center text-xs text-gray-600">
-          Mock Password: <code className="text-indigo-400">admin</code>. Go back to <a href="/login" className="text-purple-400 hover:underline">Student Login</a>.
-        </div>
 
       </div>
     </main>

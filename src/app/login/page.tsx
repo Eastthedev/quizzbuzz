@@ -141,14 +141,7 @@ export default function LoginPage() {
           </form>
         </div>
 
-        {/* Footer info for easy testing */}
-        <div className="mt-8 p-4 rounded-2xl bg-white/5 border border-white/5 text-center">
-          <p className="text-xs text-gray-500 leading-relaxed">
-            Quick credentials: Use Student ID <code className="text-purple-300">student</code> & Password <code className="text-purple-300">password</code>.
-            <br />
-            For Admin, access the admin panel via <a href="/admin/login" className="text-indigo-400 hover:underline">Admin Login</a>.
-          </p>
-        </div>
+
       </div>
     </main>
   );
