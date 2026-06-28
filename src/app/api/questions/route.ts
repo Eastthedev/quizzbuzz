@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { db } from '@/db';
 import { questions, options } from '@/db/schema';
-import { eq } from 'drizzle-orm';
+import { eq, inArray } from 'drizzle-orm';
 import { getSessionUser } from '@/lib/auth';
 
 // GET /api/questions -> List all bank questions with options
@@ -100,6 +100,41 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ success: true, questionId: newQuestionId });
   } catch (err: any) {
     console.error('Create question error:', err);
+    return NextResponse.json({ success: false, error: 'Internal Server Error' }, { status: 500 });
+  }
+}
+
+// DELETE /api/questions -> Bulk delete questions
+export async function DELETE(req: NextRequest) {
+  try {
+    const session = await getSessionUser(req);
+
+    if (!session || session.role !== 'admin') {
+      return NextResponse.json({ success: false, error: 'Unauthorized.' }, { status: 401 });
+    }
+
+    const body = await req.json().catch(() => ({}));
+    const { ids, all } = body;
+
+    if (all === true) {
+      // Delete all questions
+      await db.delete(questions);
+      return NextResponse.json({ success: true, message: 'All questions deleted from bank.' });
+    }
+
+    if (!ids || !Array.isArray(ids) || ids.length === 0) {
+      return NextResponse.json(
+        { success: false, error: 'Missing question IDs to delete.' },
+        { status: 400 }
+      );
+    }
+
+    // Delete matching questions
+    await db.delete(questions).where(inArray(questions.id, ids));
+
+    return NextResponse.json({ success: true, message: `${ids.length} questions deleted.` });
+  } catch (err: any) {
+    console.error('Bulk delete questions error:', err);
     return NextResponse.json({ success: false, error: 'Internal Server Error' }, { status: 500 });
   }
 }

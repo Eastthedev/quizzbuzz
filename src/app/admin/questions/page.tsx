@@ -23,6 +23,9 @@ export default function AdminQuestionsPage() {
   const [modalError, setModalError] = useState('');
   const [saving, setSaving] = useState(false);
 
+  // Selection states
+  const [selectedIds, setSelectedIds] = useState<string[]>([]);
+
   // Accordion lists
   const [expandedId, setExpandedId] = useState<string | null>(null);
 
@@ -31,10 +34,54 @@ export default function AdminQuestionsPage() {
       api.initializeDB();
       const data = await api.getQuestions();
       setQuestions(data);
+      setSelectedIds([]);
     } catch (err) {
       console.error(err);
     } finally {
       setLoading(false);
+    }
+  };
+
+  const handleToggleSelect = (id: string) => {
+    setSelectedIds(prev => 
+      prev.includes(id) ? prev.filter(x => x !== id) : [...prev, id]
+    );
+  };
+
+  const handleToggleSelectAll = () => {
+    if (selectedIds.length === filteredQuestions.length) {
+      setSelectedIds([]);
+    } else {
+      setSelectedIds(filteredQuestions.map(q => q.id));
+    }
+  };
+
+  const handleBulkDelete = async () => {
+    if (selectedIds.length === 0) return;
+    if (confirm(`Are you sure you want to delete ${selectedIds.length} selected question(s)?`)) {
+      try {
+        setLoading(true);
+        await api.deleteQuestions(selectedIds);
+        await loadQuestions();
+      } catch (err) {
+        console.error(err);
+      } finally {
+        setLoading(false);
+      }
+    }
+  };
+
+  const handleDeleteAll = async () => {
+    if (confirm('Are you sure you want to delete ALL questions in the entire bank? This action cannot be undone.')) {
+      try {
+        setLoading(true);
+        await api.deleteAllQuestions();
+        await loadQuestions();
+      } catch (err) {
+        console.error(err);
+      } finally {
+        setLoading(false);
+      }
     }
   };
 
@@ -192,10 +239,48 @@ export default function AdminQuestionsPage() {
 
       {/* QUESTIONS ACCORDION LIST */}
       <section className="space-y-4">
-        <div className="flex justify-between items-center px-2">
-          <span className="text-xs uppercase tracking-widest font-semibold text-gray-400">
-            Active Questions ({filteredQuestions.length})
-          </span>
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 px-2">
+          <div className="flex items-center gap-3">
+            {filteredQuestions.length > 0 && (
+              <button
+                onClick={handleToggleSelectAll}
+                className="flex items-center gap-2 px-3 py-1.5 rounded-xl text-xs font-semibold bg-white/5 border border-white/10 text-gray-300 hover:bg-white/10 transition-all font-sans"
+              >
+                <div className={`h-4 w-4 rounded border flex items-center justify-center shrink-0 ${
+                  selectedIds.length === filteredQuestions.length && filteredQuestions.length > 0
+                    ? 'bg-purple-500 border-purple-500 text-white' 
+                    : 'border-white/20'
+                }`}>
+                  {selectedIds.length === filteredQuestions.length && filteredQuestions.length > 0 && <Check className="h-3 w-3 stroke-[3]" />}
+                </div>
+                {selectedIds.length === filteredQuestions.length ? 'Deselect All' : 'Select All'}
+              </button>
+            )}
+            <span className="text-xs uppercase tracking-widest font-semibold text-gray-400">
+              Active Questions ({filteredQuestions.length})
+            </span>
+          </div>
+
+          <div className="flex gap-3">
+            {selectedIds.length > 0 && (
+              <button
+                onClick={handleBulkDelete}
+                className="flex items-center gap-1.5 px-4 py-2 bg-red-500/10 border border-red-500/30 text-red-400 rounded-xl text-xs font-semibold hover:bg-red-500/20 transition-all font-sans"
+              >
+                <Trash2 className="h-3.5 w-3.5" />
+                Delete Selected ({selectedIds.length})
+              </button>
+            )}
+            {questions.length > 0 && (
+              <button
+                onClick={handleDeleteAll}
+                className="flex items-center gap-1.5 px-4 py-2 bg-red-600 hover:bg-red-700 text-white rounded-xl text-xs font-semibold shadow-md transition-all font-sans"
+              >
+                <Trash2 className="h-3.5 w-3.5" />
+                Delete All
+              </button>
+            )}
+          </div>
         </div>
 
         {loading ? (
@@ -210,33 +295,48 @@ export default function AdminQuestionsPage() {
           <div className="space-y-4">
             {filteredQuestions.map((q) => {
               const isExpanded = expandedId === q.id;
+              const isSelected = selectedIds.includes(q.id);
               return (
                 <div 
                   key={q.id}
-                  className="glass-panel rounded-3xl border border-white/5 overflow-hidden hover:border-white/10 transition-all"
+                  className={`glass-panel rounded-3xl border overflow-hidden hover:border-white/10 transition-all ${
+                    isSelected ? 'border-purple-500/40 bg-purple-500/5' : 'border-white/5'
+                  }`}
                 >
                   {/* Collapsible header */}
                   <div 
                     onClick={() => setExpandedId(isExpanded ? null : q.id)}
                     className="p-5 flex items-center justify-between cursor-pointer hover:bg-white/5 transition-colors"
                   >
-                    <div className="space-y-1.5 pr-4 truncate">
-                      <div className="flex items-center gap-2.5 flex-wrap">
-                        <span className="text-[10px] font-bold font-mono text-purple-400">ID: {q.id}</span>
-                        <span className={`px-2 py-0.5 rounded-full text-[9px] font-bold border uppercase ${
-                          q.difficulty === 'easy'
-                            ? 'bg-emerald-500/10 border-emerald-500/20 text-emerald-400'
-                            : q.difficulty === 'medium'
-                              ? 'bg-amber-500/10 border-amber-500/20 text-amber-400'
-                              : 'bg-red-500/10 border-red-500/20 text-red-400'
-                        }`}>
-                          {q.difficulty}
-                        </span>
-                        <span className="text-[10px] text-gray-400 font-semibold">{q.topic}</span>
+                    <div className="flex items-start gap-4 flex-1 pr-4 truncate">
+                      {/* Checkbox */}
+                      <div 
+                        onClick={(e) => { e.stopPropagation(); handleToggleSelect(q.id); }}
+                        className={`h-5 w-5 mt-1 rounded border flex items-center justify-center shrink-0 transition-all ${
+                          isSelected ? 'bg-purple-500 border-purple-500 text-white' : 'border-white/20 hover:border-white/40'
+                        }`}
+                      >
+                        {isSelected && <Check className="h-3.5 w-3.5 stroke-[3]" />}
                       </div>
-                      <p className="text-xs text-gray-300 font-medium leading-normal truncate max-w-lg">
-                        {q.stem}
-                      </p>
+
+                      <div className="space-y-1.5 flex-1 truncate">
+                        <div className="flex items-center gap-2.5 flex-wrap">
+                          <span className="text-[10px] font-bold font-mono text-purple-400">ID: {q.id}</span>
+                          <span className={`px-2 py-0.5 rounded-full text-[9px] font-bold border uppercase ${
+                            q.difficulty === 'easy'
+                              ? 'bg-emerald-500/10 border-emerald-500/20 text-emerald-400'
+                              : q.difficulty === 'medium'
+                                ? 'bg-amber-500/10 border-amber-500/20 text-amber-400'
+                                : 'bg-red-500/10 border-red-500/20 text-red-400'
+                          }`}>
+                            {q.difficulty}
+                          </span>
+                          <span className="text-[10px] text-gray-400 font-semibold">{q.topic}</span>
+                        </div>
+                        <p className="text-xs text-gray-300 font-medium leading-normal truncate max-w-lg">
+                          {q.stem}
+                        </p>
+                      </div>
                     </div>
                     
                     <div className="flex items-center gap-3 shrink-0">

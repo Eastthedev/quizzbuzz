@@ -165,6 +165,22 @@ export async function deleteQuestion(questionId: string): Promise<boolean> {
   return true;
 }
 
+export async function deleteQuestions(ids: string[]): Promise<boolean> {
+  await request('/api/questions', {
+    method: 'DELETE',
+    body: JSON.stringify({ ids }),
+  });
+  return true;
+}
+
+export async function deleteAllQuestions(): Promise<boolean> {
+  await request('/api/questions', {
+    method: 'DELETE',
+    body: JSON.stringify({ all: true }),
+  });
+  return true;
+}
+
 // ATTEMPTS & ACTIVE SESSION APIS
 export async function startAttempt(quizId: string, userId: string): Promise<Attempt> {
   const data = await request<{ success: boolean; attempt: Attempt }>('/api/attempts', {
