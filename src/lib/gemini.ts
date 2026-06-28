@@ -105,6 +105,65 @@ function isValidQuestion(q: any, type: "mcq" | "tf" | "mixed"): boolean {
 }
 
 /**
+ * [FIX 3] CROSS-CHUNK DEDUPLICATION
+ * Removes near-duplicate questions across chunks using Jaccard word-overlap similarity.
+ */
+function deduplicateQuestions(questions: QuizQuestion[]): QuizQuestion[] {
+  const stopwords = new Set([
+    "the", "a", "is", "of", "and", "what", "which", "are", "in", "to", 
+    "for", "with", "on", "at", "by", "an", "it", "this", "that"
+  ]);
+  
+  // Helper to tokenize question string into a Set of lowercase words, filtering out stopwords
+  const getWordSet = (text: any): Set<string> => {
+    if (typeof text !== "string") return new Set();
+    const words = text.toLowerCase()
+      .replace(/[^\w\s]/g, "") // strip punctuation
+      .split(/\s+/);
+    return new Set(words.filter(w => w.length > 0 && !stopwords.has(w)));
+  };
+
+  const wordSets = questions.map(q => getWordSet(q.question));
+  const uniqueQuestions: QuizQuestion[] = [];
+  const uniqueWordSets: Set<string>[] = [];
+
+  for (let i = 0; i < questions.length; i++) {
+    const currentQ = questions[i];
+    const currentSet = wordSets[i];
+    
+    // Compute Jaccard similarity against all already kept unique questions
+    let isDuplicate = false;
+    for (let j = 0; j < uniqueQuestions.length; j++) {
+      const targetSet = uniqueWordSets[j];
+      
+      // Calculate intersection size
+      let intersectionSize = 0;
+      currentSet.forEach(word => {
+        if (targetSet.has(word)) {
+          intersectionSize++;
+        }
+      });
+      
+      // Calculate union size
+      const unionSize = currentSet.size + targetSet.size - intersectionSize;
+      const jaccardSim = unionSize > 0 ? intersectionSize / unionSize : 0;
+      
+      if (jaccardSim > 0.6) {
+        isDuplicate = true;
+        break;
+      }
+    }
+
+    if (!isDuplicate) {
+      uniqueQuestions.push(currentQ);
+      uniqueWordSets.push(currentSet);
+    }
+  }
+
+  return uniqueQuestions;
+}
+
+/**
  * Generates questions for a single chunk of notes using the Gemini API.
  */
 async function generateQuizSingleCall(
@@ -123,7 +182,8 @@ async function generateQuizSingleCall(
     type === "tf" ? "true/false questions only (exactly 2 options: True and False)" :
     "a mix of multiple-choice questions (4 options) and true/false questions (2 options)";
 
-  // Enhanced prompt containing new QUESTION DESIGN RULES, DIFFICULTY DEFINITIONS, topic instruction, and self-checks.
+  // Enhanced prompt containing QUESTION DESIGN RULES, DIFFICULTY DEFINITIONS, topic instruction, and self-checks.
+  // Includes [FIX 1] for phrasings of True/False statements.
   const prompt = `Create exactly ${count} medical exam questions based on the study material below.
 Difficulty Level: ${difficulty}.
 Question Type: ${typeInstruction}.
@@ -137,7 +197,10 @@ Question Type: ${typeInstruction}.
    - Clinical-vignette application (clinical scenarios where concepts are applied to diagnose/treat)
    - "Which of the following is NOT/FALSE" style (identifying incorrect statements based on the text)
 3. MCQ DISTRACTORS: Ensure all distractors (incorrect choices) are plausible, same-category as the correct answer, and challenge the student. Never use "all of the above", "none of the above", or simple joke/implausible options.
-4. TRUE/FALSE VARIATION: For True/False questions, do not trivially negate a sentence (e.g., adding "not"). Instead, alter one key variable such as a number, direction (increase/decrease), causal link, or sequence to make it false.
+4. TRUE/FALSE VARIATION: For True/False questions:
+   - [FIX 1] The "question" field MUST be phrased as a single declarative statement (e.g. "Allopurinol is first-line therapy for acute gout flares"), NOT as a question (e.g. NOT "What is first-line therapy for acute gout?"). The True/False answer should reflect whether that declarative statement is accurate or inaccurate per the study material.
+   - [FIX 1] The options must be exactly ["True", "False"]. The correctIndex must reflect whether that declarative statement is accurate or inaccurate.
+   - Do not trivially negate a sentence (e.g., adding "not"). Instead, alter one key variable such as a number, direction (increase/decrease), causal link, or sequence to make it false.
 5. OPTION CONSISTENCY: Keep option lengths, grammar, and tone consistent across all choices for a question so that option length or style is not a clue.
 6. NO DUPLICATION: Do not test the exact same fact or concept multiple times across the question set.
 
@@ -225,10 +288,12 @@ ${notes}`;
 
 /**
  * Main quiz generation entry point. Upgraded to handle:
- * 1. Rich prompt engineering (rigorous medical design rules).
+ * 1. Rich prompt engineering (rigorous medical design rules) with [FIX 1] statement format.
  * 2. Automated paragraph-based chunking for long documents (>6000 chars).
- * 3. Strict structural validation and option shuffling.
- * 4. Verbose error handling.
+ * 3. [FIX 3] Deduplication using word tokenization and Jaccard similarity.
+ * 4. Strict structural validation and option shuffling.
+ * 5. [FIX 2] One-time retry/backfill fallback to meet question count targets.
+ * 6. Verbose error handling.
  */
 export async function generateQuiz(
   notes: string,
@@ -272,14 +337,37 @@ export async function generateQuiz(
     rawQuestions = await generateQuizSingleCall(notes, count, type, difficulty);
   }
 
+  // [FIX 3] CROSS-CHUNK DEDUPLICATION (happens first on merged rawQuestions)
+  rawQuestions = deduplicateQuestions(rawQuestions);
+
   // Post-processing: Filter valid questions and shuffle their options
-  const finalQuestions = rawQuestions
+  let finalQuestions = rawQuestions
     .filter(q => isValidQuestion(q, type))
     .map(q => shuffleQuestionOptions(q));
 
-  // Log warning if we generated fewer valid questions than requested
+  // [FIX 2] RETRY/BACKFILL FOR SHORTFALL (using full original notes un-chunked)
   if (finalQuestions.length < count) {
-    console.warn(`Generated only ${finalQuestions.length} valid questions, but ${count} were requested.`);
+    const shortfall = count - finalQuestions.length;
+    try {
+      const retryQuestions = await generateQuizSingleCall(notes, shortfall, type, difficulty);
+      const validRetryQuestions = retryQuestions
+        .filter(q => isValidQuestion(q, type))
+        .map(q => shuffleQuestionOptions(q));
+      
+      finalQuestions = finalQuestions.concat(validRetryQuestions);
+    } catch (retryErr) {
+      console.error("Retry/backfill question generation failed:", retryErr);
+    }
+  }
+
+  // Truncate to at most `count` total questions in case retry returned more than needed
+  if (finalQuestions.length > count) {
+    finalQuestions = finalQuestions.slice(0, count);
+  }
+
+  // [FIX 2] Log warning if we generated fewer valid questions than requested, after the retry backfill attempt
+  if (finalQuestions.length < count) {
+    console.warn(`Generated only ${finalQuestions.length} valid questions, but ${count} were requested after retry backfill.`);
   }
 
   return finalQuestions;
