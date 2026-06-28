@@ -3,10 +3,10 @@ import postgres from 'postgres';
 import * as schema from './schema';
 import 'dotenv/config';
 
-const connectionString = process.env.DATABASE_URL;
+const connectionString = process.env.DATABASE_URL || 'postgres://dummy:dummy@localhost:5432/dummy';
 
-if (!connectionString) {
-  throw new Error('DATABASE_URL environment variable is missing.');
+if (!process.env.DATABASE_URL) {
+  console.warn('Warning: DATABASE_URL environment variable is missing. Falling back to dummy URL for build-time compilation.');
 }
 
 // Reuse connection client in development to prevent leaks on hot reload
